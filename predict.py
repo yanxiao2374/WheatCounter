@@ -20,8 +20,6 @@ def predict_count(img):
         print("=> loading checkpoint '{}'".format(pretrained_path))
         checkpoint = torch.load(pretrained_path,map_location="cuda:0")
         state_dict = checkpoint['state_dict']
-        for k in state_dict.keys():
-            print(k)
         model.load_state_dict(checkpoint['state_dict'], strict=True)
     else:
         print("=> no checkpoint found at '{}'".format(pretrained_path))
