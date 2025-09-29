@@ -1,5 +1,5 @@
 from __future__ import division
-from models import base_patch16_384_token, base_patch16_384_gap
+from models import base_patch16_384_gap
 from PIL import Image
 from torchvision import transforms
 import torch
@@ -15,17 +15,16 @@ def predict_count(img):
     model = base_patch16_384_gap(pretrained=False)
     model = nn.DataParallel(model, device_ids=[0])
     model = model.cuda()
-    pretrained_path="./models/model_best.pth"
+    pretrained_path="./models/checkpoint.pth"
     if os.path.isfile(pretrained_path):
         print("=> loading checkpoint '{}'".format(pretrained_path))
         checkpoint = torch.load(pretrained_path,map_location="cuda:0")
-        state_dict = checkpoint['state_dict']
         model.load_state_dict(checkpoint['state_dict'], strict=True)
     else:
         print("=> no checkpoint found at '{}'".format(pretrained_path))
 
     model.eval()
-    img=preprocess_image(img)
+    img = preprocess_image(img)
     img = img.cuda()
     # print(img.shape)
     if len(img.shape) == 5:
@@ -46,7 +45,7 @@ def preprocess_image(img):
         transforms.Normalize([0.485, 0.456, 0.406],
                              [0.229, 0.224, 0.225])
     ])
-    img =transform(img) # [ C, H, W]
+    img = transform(img)#[C, H, W]
     width, height = img.shape[2], img.shape[1]
     m = int(width / 384)
     n = int(height / 384)

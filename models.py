@@ -1,5 +1,8 @@
 # Copyright (c) 2015-present, Facebook, Inc.
 # All rights reserved.
+import cv2
+import numpy as np
+import datetime
 import torch
 import torch.nn as nn
 from functools import partial
@@ -87,6 +90,43 @@ class VisionTransformer_gap(VisionTransformer):
         return x
 
     def forward(self, x):
+        B, C, H, W = x.shape
+        print(x.shape)
+        for i in range(B):
+            x_feat = self.forward_features(x)  # (B, N_patches, embed_dim)
+
+            feat_map = x_feat[i]  # 取第一个样本 (N_patches, embed_dim)
+            heatmap = torch.norm(feat_map, dim=1)  # L2范数 (N_patches,)
+
+            # patch数假设为方形
+            n_patches = feat_map.shape[0]
+            n_h = n_w = int(n_patches ** 0.5)
+            heatmap = heatmap.reshape(n_h, n_w).detach().cpu().numpy()
+
+            # 上采样到原图大小
+            heatmap = cv2.resize(heatmap, (W, H))
+            heatmap_norm = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())  # 归一化
+
+            # 转成彩色热图
+            heatmap_color = cv2.applyColorMap(np.uint8(255 * heatmap_norm), cv2.COLORMAP_JET)
+            heatmap_color = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
+
+            # 原图归一化到0~255
+            img_np = x[i].detach().cpu().numpy().transpose(1, 2, 0)
+            img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min()) * 255
+            img_np = img_np.astype(np.uint8)
+
+            # 叠加热图
+            overlay = cv2.addWeighted(img_np, 0.6, heatmap_color, 0.4, 0)
+            now = datetime.datetime.now()
+            time_str = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 去掉微秒最后3位，只保留毫秒
+
+            # 拼接文件名
+            save_path = f"/mnt/d/PythonStore/WheatCounter/show_{time_str}.jpg"
+            cv2.imwrite(save_path,cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+
+
+
         x = self.forward_features(x)
         # x = self.head(x)
         x = F.adaptive_avg_pool1d(x, (48))
