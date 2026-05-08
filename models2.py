@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from timm.models.vision_transformer import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_
-from foreground import foreground_generator
+from foreground_bc import foreground_generator
 
 class VisionTransformer_token(VisionTransformer):
     def __init__(self, *args, **kwargs):
@@ -97,14 +97,7 @@ class VisionTransformer_gap(VisionTransformer):
     def forward(self, x):
         B, C, H, W = x.shape
         x_last, all_feats = self.forward_features(x, return_all=True)
-        return foreground_generator(x_last,all_feats,B,C,H,W,x)
-
-        x = self.forward_features(x)
-        # x = self.head(x)
-        x = F.adaptive_avg_pool1d(x, (48))
-        x = x.view(x.shape[0], -1)
-        x = self.output1(x)
-        return x
+        return foreground_generator(all_feats,B,C,H,W,x)
 
 
 

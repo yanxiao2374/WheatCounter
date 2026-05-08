@@ -1,6 +1,5 @@
 import streamlit as st
 from PIL import Image
-import torch
 from predict import predict_count
 
 st.title("🌾 Wheat Counter")

@@ -10,7 +10,8 @@ import torch.nn.functional as F
 from timm.models.vision_transformer import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_
-from foreground import foreground_generator
+
+
 
 class VisionTransformer_token(VisionTransformer):
     def __init__(self, *args, **kwargs):
@@ -69,7 +70,7 @@ class VisionTransformer_gap(VisionTransformer):
         )
         self.output1.apply(self._init_weights)
 
-    def forward_features(self, x,return_all=False):
+    def forward_features(self, x):
         B = x.shape[0]
         x = self.patch_embed(x)
 
@@ -79,32 +80,47 @@ class VisionTransformer_gap(VisionTransformer):
         x = x + self.pos_embed
         x = self.pos_drop(x)
 
-        all_feats = []  # 存放每一层特征
-
         for blk in self.blocks:
             x = blk(x)
-            if return_all:
-                all_feats.append(x.clone())  # 保存当前层输出
 
         x = self.norm(x)
 
         x = x[:, 1:]
 
-        if return_all:
-            return x, all_feats
         return x
 
     def forward(self, x):
         B, C, H, W = x.shape
-        x_last, all_feats = self.forward_features(x, return_all=True)
-        return foreground_generator(x_last,all_feats,B,C,H,W,x)
+        overlays = []
+        for i in range(B):
+            x_feat = self.forward_features(x)  # (B, N_patches, embed_dim)
 
-        x = self.forward_features(x)
-        # x = self.head(x)
-        x = F.adaptive_avg_pool1d(x, (48))
-        x = x.view(x.shape[0], -1)
-        x = self.output1(x)
-        return x
+            feat_map = x_feat[i]  # 取一个样本 (N_patches, embed_dim)
+            heatmap = torch.norm(feat_map, dim=1)  # L2范数 (N_patches,)
+
+            # patch数假设为方形
+            n_patches = feat_map.shape[0]
+            n_h = n_w = int(n_patches ** 0.5)
+            heatmap = heatmap.reshape(n_h, n_w).detach().cpu().numpy()
+
+            # 上采样到原图大小
+            heatmap = cv2.resize(heatmap, (W, H))
+            heatmap_norm = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())  # 归一化
+
+            # 转成彩色热图
+            heatmap_color = cv2.applyColorMap(np.uint8(255 * heatmap_norm), cv2.COLORMAP_JET)
+            heatmap_color = cv2.cvtColor(heatmap_color, cv2.COLOR_BGR2RGB)
+
+            # 原图归一化到0~255
+            img_np = x[i].detach().cpu().numpy().transpose(1, 2, 0)
+            img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min()) * 255
+            img_np = img_np.astype(np.uint8)
+
+            # 叠加热图
+            overlay = cv2.addWeighted(img_np, 0.6, heatmap_color, 0.4, 0)
+            # overlay = heatmap_color.copy()
+            overlays.append(overlay)
+        return overlays
 
 
 
@@ -136,4 +152,3 @@ def base_patch16_384_gap(pretrained=False, **kwargs):
         model.load_state_dict(checkpoint["model"], strict=False)
         print("load transformer pretrained")
     return model
-

@@ -1,51 +1,49 @@
 from __future__ import division
-from models import base_patch16_384_gap
+import numpy as np
+from models import base_patch16_384_token, base_patch16_384_gap
 from PIL import Image
 from torchvision import transforms
 import torch
 import torch.nn as nn
 import os
+import cv2
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 
-def predict_count(img):
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-
-    model = base_patch16_384_gap(pretrained=False)
-    model = nn.DataParallel(model, device_ids=[0])
-    model = model.cuda()
-    pretrained_path="./models/checkpoint.pth"
-    if os.path.isfile(pretrained_path):
-        print("=> loading checkpoint '{}'".format(pretrained_path))
-        checkpoint = torch.load(pretrained_path,map_location="cuda:0")
-        model.load_state_dict(checkpoint['state_dict'], strict=True)
-    else:
-        print("=> no checkpoint found at '{}'".format(pretrained_path))
-
-    model.eval()
-    img = preprocess_image(img)
+def fore_generater(img,save_path):
+    img=preprocess_image(img)
     img = img.cuda()
-    # print(img.shape)
     if len(img.shape) == 5:
         img = img.squeeze(0)
     if len(img.shape) == 3:
         img = img.unsqueeze(0)
-    # print("***", img.shape)
     with torch.no_grad():
-        out = model(img)
-        count = torch.sum(out).item()
-    return count
+        overlay = model(img)
+        cv2.imwrite(save_path, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+
 
 def preprocess_image(img):
-    if img.width < 384 or img.height < 384:
-        img = img.resize((max(384, img.width), max(384, img.height)), Image.BILINEAR)
+    base=384
+    if not isinstance(img, np.ndarray):
+        img = np.array(img)
+    H, W = img.shape[:2]
+    # 找到最接近 base 的倍数
+    new_h = int(round(H / base) * base)
+    new_w = int(round(W / base) * base)
+
+    # 避免出现0
+    new_h = max(new_h, base)
+    new_w = max(new_w, base)
+    # 缩放图像
+    img = cv2.resize(img, (new_w, new_h))
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406],
                              [0.229, 0.224, 0.225])
     ])
-    img = transform(img)#[C, H, W]
+    img =transform(img) # [ C, H, W]
     width, height = img.shape[2], img.shape[1]
     m = int(width / 384)
     n = int(height / 384)
@@ -59,3 +57,40 @@ def preprocess_image(img):
 
                 img_return = torch.cat([img_return, crop_img], 0).cuda()
     return img_return
+
+
+if __name__=="__main__":
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+    model = base_patch16_384_gap(pretrained=False)
+    model = model.cuda()
+    pretrained_path = "/data1/mazc/mrf/code/TransCrowd_Wheathead/model/gwhd_fore_sparse/model_best.pth"
+    if os.path.isfile(pretrained_path):
+        print("=> loading checkpoint '{}'".format(pretrained_path))
+        checkpoint = torch.load(pretrained_path,map_location="cuda:0")
+        state_dict = checkpoint['state_dict']
+        # 检查是否由 DataParallel 保存（参数名以 'module.' 开头）
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            print("=> Detected DataParallel checkpoint, adapting keys...")
+            # 去掉 'module.' 前缀
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                new_k = k.replace('module.', '', 1)
+                new_state_dict[new_k] = v
+            state_dict = new_state_dict
+        model.load_state_dict(state_dict, strict=True)
+    else:
+        print("=> no checkpoint found at '{}'".format(pretrained_path))
+
+    model.eval()
+    img_dir = "/data1/mazc/mrf/Datasets/TransCrowd/GlobalWheat2020/resize_images/train"
+    save_dir="/data1/mazc/mrf/Datasets/TransCrowd/GlobalWheat2020/foreground/train_sparse"
+
+    # 支持的图片格式
+    img_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff')
+    for filename in os.listdir(img_dir):
+        if filename.lower().endswith(img_extensions):
+            img_path = os.path.join(img_dir, filename)
+            img = Image.open(img_path).convert('RGB')
+            save_path = os.path.join(save_dir, filename)
+            fore_generater(img,save_path)
